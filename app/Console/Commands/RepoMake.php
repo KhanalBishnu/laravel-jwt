@@ -57,8 +57,12 @@ class RepoMake extends Command
             $this->warn("⚠️ Controller already exists: {$modelClass}Controller");
         }
 
-        // 5️⃣ Bind Interface to Repository in AppServiceProvider
-        $this->updateAppServiceProvider($modelClass);
+        $newRepoInterfaceName = "{$modelClass}RepositoryInterface";
+        $newRepoName = "{$modelClass}Repository";
+
+        $this->updateAppServiceProvider($newRepoInterfaceName,$newRepoName);
+
+          
     }
 
     // 🏗️ Interface Template
@@ -126,6 +130,8 @@ class RepoMake extends Command
     // 🏗️ Controller Template
     protected function getControllerTemplate($modelClass)
     {
+        $model_repo= Str::lower($modelClass);
+
         return <<<PHP
         <?php
 
@@ -136,69 +142,76 @@ class RepoMake extends Command
 
         class {$modelClass}Controller extends Controller
         {
-            protected \${$modelClass}Repository;
+            protected \${$model_repo}Repository;
 
-            public function __construct({$modelClass}RepositoryInterface \${$modelClass}Repository)
+            public function __construct({$modelClass}RepositoryInterface \${$model_repo}Repository)
             {
-                \$this->{$modelClass}Repository = \${$modelClass}Repository;
+                \$this->{$model_repo}Repository = \${$model_repo}Repository;
             }
 
             public function index()
             {
-                return response()->json(\$this->{$modelClass}Repository->getAll());
+                return response()->json(\$this->{$model_repo}Repository->getAll());
             }
 
             public function show(\$id)
             {
-                return response()->json(\$this->{$modelClass}Repository->findById(\$id));
+                return response()->json(\$this->{$model_repo}Repository->findById(\$id));
             }
 
             public function store(Request \$request)
             {
-                return response()->json(\$this->{$modelClass}Repository->create(\$request->all()));
+                return response()->json(\$this->{$model_repo}Repository->create(\$request->all()));
             }
 
             public function update(Request \$request, \$id)
             {
-                return response()->json(\$this->{$modelClass}Repository->update(\$id, \$request->all()));
+                return response()->json(\$this->{$model_repo}Repository->update(\$id, \$request->all()));
             }
 
             public function destroy(\$id)
             {
-                return response()->json(\$this->{$modelClass}Repository->delete(\$id));
+                return response()->json(\$this->{$model_repo}Repository->delete(\$id));
             }
         }
         PHP;
     }
-
-    // 🔗 Update AppServiceProvider for Binding
-    protected function updateAppServiceProvider($modelClass)
-    {
-        $serviceProviderPath = app_path('Providers/AppServiceProvider.php');
-        $interfaceNamespace = "App\\Repositories\\Interfaces\\{$modelClass}RepositoryInterface";
-        $repositoryNamespace = "App\\Repositories\\{$modelClass}Repository";
-
-        // Read existing file
-        $content = File::get($serviceProviderPath);
-
-        // Check if binding already exists
-        if (Str::contains($content, "{$interfaceNamespace}::class")) {
-            $this->warn("⚠️ Binding already exists in AppServiceProvider");
-            return;
-        }
-
-        // Insert binding into register() method
-        $binding = "\$this->app->bind({$interfaceNamespace}::class, {$repositoryNamespace}::class);";
-
-        if (Str::contains($content, 'public function register()')) {
-            // Insert after "public function register() {"
-            $updatedContent = preg_replace('/public function register\(\)\s*{/', "public function register()\n    {\n        {$binding}", $content);
-        } else {
-            // Append at the end
-            $updatedContent = str_replace("}", "\n    public function register()\n    {\n        {$binding}\n    }\n}", $content);
-        }
-
-        File::put($serviceProviderPath, $updatedContent);
-        $this->info("✅ AppServiceProvider updated with repository binding");
+    protected function updateAppServiceProvider($newRepoInterfaceName, $newRepoName)
+{
+   
+    $impexoServiceProvider = 'app/Providers/AppServiceProvider.php';
+    $impexoServiceProviderContents = file_get_contents($impexoServiceProvider);
+    
+    // 🔹 STEP 1: Add "use" statements after "namespace"
+    $namespacePosition = strpos($impexoServiceProviderContents, 'namespace');
+    $namespaceEndPosition = strpos($impexoServiceProviderContents, ';', $namespacePosition) + 1; // After `namespace`
+    $useInterface = "use App\Repositories\\" . $newRepoInterfaceName . ";";
+    $useRepo = "use App\Repositories\\" . $newRepoName . ";";
+    $addStringTop = "\n$useInterface\n$useRepo\n";
+    $updatedContentFirst = substr_replace($impexoServiceProviderContents, $addStringTop, $namespaceEndPosition, 0);
+    
+    // 🔹 STEP 2: Locate the "register" method and append the binding statement inside it
+    $registerStartPosition = strpos($updatedContentFirst, 'public function register()');
+    $registerEndPosition = strpos($updatedContentFirst, '}', $registerStartPosition) - 1; // Find before closing `}`
+    
+    // ✅ Append the new bind statement without removing previous ones
+    $addStringBot = '
+            $this->app->bind(
+                ' . $newRepoInterfaceName . '::class,
+                ' . $newRepoName . '::class
+            );
+    ';
+    
+    // Insert the new bind statement before the `}` in `register` method
+    $updatedContentSecond = substr_replace($updatedContentFirst, $addStringBot, $registerEndPosition, 0);
+    
+    // 🔹 STEP 3: Save the modified content back to `AppServiceProvider.php`
+    if (file_put_contents($impexoServiceProvider, $updatedContentSecond) !== false) {
+        $this->line(' ✅ Updated AppServiceProvider successfully.');
+    } else {
+        $this->error('Cannot update AppServiceProvider.');
     }
+    
+}
+
 }
